@@ -1,6 +1,6 @@
 # Prompt For AI Agent
 
-Ines implements JetBrians PSI using Go and a Tree-sitter.
+Ines implements JetBrains PSI using Go and Tree-sitter.
 
 Implementation: First, lexical analysis is performed, followed by parsing: a tree-sitter is used to construct an AST (Abstract Syntax Tree) from the token sequence.
 
@@ -14,7 +14,7 @@ PsiFile → PsiClass → PsiMethod → ​​PsiParameter → PsiExpression
 
 2. Key Components
 
-PsiElement: The base class for all PSI nodes, providing basic tree operations (such as getting parent nodes, child nodes, text ranges, etc.).
+PsiElement: The core interface implemented by PSI node structs, providing basic tree operations (such as getting parent nodes, child nodes, text ranges, etc.).
 
 PsiFile: Represents the entire source file and is the root node of the PSI tree.
 
