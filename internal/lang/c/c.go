@@ -19,7 +19,7 @@ func init() {
 		regexparser.MustRule(psi.KindNamespace, `^\s*namespace\s+([A-Za-z_][A-Za-z0-9_]*)`),
 		regexparser.MustRule(psi.KindClass, `^\s*(?:template\s*<[^>]*>\s*)?class\s+([A-Za-z_][A-Za-z0-9_]*)`),
 		regexparser.MustRule(psi.KindStruct, `^\s*struct\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindEnum, `^\s*(?:enum|enum\s+class)\s+([A-Za-z_][A-Za-z0-9_]*)`),
+		regexparser.MustRule(psi.KindEnum, `^\s*enum(?:\s+(?:class|struct))?\s+([A-Za-z_][A-Za-z0-9_]*)`),
 		regexparser.MustRule(psi.KindFunction, `^\s*(?:[A-Za-z_][\w:<>,\s\*&]*\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{?$`),
 	}
 	parser := regexparser.New("cpp", rules, regexp.MustCompile(`^\s*//`))

@@ -160,6 +160,8 @@ func (s *Server) handleIndexWorkspace(ctx context.Context, frame *Frame) {
 	}
 
 	go func() {
+		// Capture the context for this indexing run to detect stale updates.
+		runCtx := indexCtx
 		for p := range progressCh {
 			s.notify(NotifIndexProgress, IndexProgress{
 				Phase:       p.Phase,
@@ -169,8 +171,12 @@ func (s *Server) handleIndexWorkspace(ctx context.Context, frame *Frame) {
 				Fraction:    p.Fraction(),
 			})
 		}
-		stats := s.indexer.Stats()
-		s.metrics.SetIndexedFiles(stats.Files)
+		// Only update metrics if this context hasn't been cancelled (i.e., we're
+		// still the active indexing run).
+		if runCtx.Err() == nil {
+			stats := s.indexer.Stats()
+			s.metrics.SetIndexedFiles(stats.Files)
+		}
 	}()
 
 	s.respond(frame, map[string]any{"accepted": true, "workspace": workspace})

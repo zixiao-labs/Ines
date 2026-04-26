@@ -67,9 +67,20 @@ func (p *Parser) Parse(src parser.Source) (psi.File, error) {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		lineLen := len(line)
-		// scanner strips the trailing newline; we still need to advance our
-		// running offset past it for accurate ranges.
-		nextOffset := offset + lineLen + 1
+		// Scanner strips the trailing newline (and any preceding \r for CRLF).
+		// Derive the actual line end from the source content to handle both
+		// LF and CRLF correctly.
+		nextOffset := offset + lineLen
+		if nextOffset < len(src.Content) {
+			// Find the newline boundary in the original content.
+			nlIndex := bytes.IndexByte(src.Content[nextOffset:], '\n')
+			if nlIndex >= 0 {
+				nextOffset = nextOffset + nlIndex + 1
+			} else {
+				// No newline found (last line without trailing newline).
+				nextOffset = len(src.Content)
+			}
+		}
 
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
@@ -91,6 +102,8 @@ func (p *Parser) Parse(src parser.Source) (psi.File, error) {
 			end := offset + match[1]
 			el := psi.NewElement(rule.Kind, name, psi.Range{Start: start, End: end}, src.Content, p.language)
 			file.AddChild(el)
+			// Stop after first matching rule to avoid duplicates.
+			break
 		}
 		offset = nextOffset
 	}

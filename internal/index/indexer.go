@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zixiao-labs/ines/internal/lang"
+	"github.com/zixiao-labs/ines/internal/metrics"
 	"github.com/zixiao-labs/ines/internal/parser"
 	"github.com/zixiao-labs/ines/internal/psi"
 )
@@ -37,11 +38,15 @@ type Indexer struct {
 	// MaxFileSize bounds the largest file the indexer will read. 0 disables
 	// the limit. Defaults to 4 MiB.
 	MaxFileSize int64
+	// runMu serializes Index() calls to prevent reentrancy bugs where an old
+	// worker goroutine writes into a freshly reset entries map.
+	runMu    sync.Mutex
+	reporter *metrics.Reporter
 }
 
 // NewIndexer constructs an Indexer with the conventional default skip set
 // (vendored dependencies, build outputs, VCS metadata).
-func NewIndexer() *Indexer {
+func NewIndexer(reporter *metrics.Reporter) *Indexer {
 	return &Indexer{
 		entries: map[string]*Entry{},
 		SkipDirs: map[string]struct{}{
@@ -59,6 +64,7 @@ func NewIndexer() *Indexer {
 			".cache":       {},
 		},
 		MaxFileSize: 4 << 20,
+		reporter:    reporter,
 	}
 }
 
@@ -79,9 +85,13 @@ func (idx *Indexer) Index(ctx context.Context, root string) (<-chan Progress, er
 		return nil, errors.New("indexer: root is not a directory")
 	}
 
+	// Serialize Index() calls to prevent reentrancy bugs.
+	idx.runMu.Lock()
+
 	progress := make(chan Progress, 64)
 	go func() {
 		defer close(progress)
+		defer idx.runMu.Unlock()
 		send := func(p Progress) {
 			select {
 			case progress <- p:
@@ -173,11 +183,16 @@ func (idx *Indexer) parseOne(path string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
 	file, err := adapter.Parser.Parse(parser.Source{
 		Path:     path,
 		Content:  content,
 		Language: adapter.Language,
 	})
+	duration := time.Since(start)
+	if idx.reporter != nil {
+		idx.reporter.ObserveParse(duration)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,8 @@
 package lang
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -44,7 +46,12 @@ func Register(adapter *Adapter) {
 	adapters[adapter.Language] = adapter
 	registered = append(registered, adapter)
 	for _, ext := range adapter.Extensions {
-		byExt[normaliseExt(ext)] = adapter
+		normExt := normaliseExt(ext)
+		if existing, ok := byExt[normExt]; ok && existing.Language != adapter.Language {
+			fmt.Fprintf(os.Stderr, "warning: extension %s conflict: %s overwrites %s\n",
+				normExt, adapter.Language, existing.Language)
+		}
+		byExt[normExt] = adapter
 	}
 }
 
@@ -66,8 +73,8 @@ func ByLanguage(language string) *Adapter {
 }
 
 // ByPath inspects the file extension of path and returns the matching
-// adapter. Hidden files without an extension are treated as language-agnostic
-// and yield nil.
+// adapter. Hidden filenames like ".bashrc" or ".env" are treated as
+// extensions and queried in byExt; only paths with no dot at all return nil.
 func ByPath(path string) *Adapter {
 	mu.RLock()
 	defer mu.RUnlock()

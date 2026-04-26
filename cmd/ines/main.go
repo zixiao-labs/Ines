@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -45,11 +46,11 @@ func main() {
 	}()
 
 	codec := ipc.NewCodec(os.Stdin, os.Stdout)
-	indexer := index.NewIndexer()
 	reporter := metrics.NewReporter()
+	indexer := index.NewIndexer(reporter)
 	server := ipc.NewServer(codec, indexer, reporter)
 
-	if err := server.Run(ctx); err != nil {
+	if err := server.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "ines: server exited with error: %v\n", err)
 		os.Exit(1)
 	}
