@@ -108,9 +108,7 @@ func (idx *Indexer) Index(ctx context.Context, root string) (<-chan Progress, er
 		total := len(queue)
 		send(Progress{Phase: "parsing", Done: 0, Total: total})
 
-		idx.mu.Lock()
-		idx.entries = make(map[string]*Entry, total)
-		idx.mu.Unlock()
+		newEntries := make(map[string]*Entry, total)
 
 		for i, path := range queue {
 			if ctx.Err() != nil {
@@ -118,9 +116,7 @@ func (idx *Indexer) Index(ctx context.Context, root string) (<-chan Progress, er
 			}
 			entry, err := idx.parseOne(path)
 			if err == nil && entry != nil {
-				idx.mu.Lock()
-				idx.entries[path] = entry
-				idx.mu.Unlock()
+				newEntries[path] = entry
 			}
 			send(Progress{
 				Phase:       "parsing",
@@ -129,6 +125,9 @@ func (idx *Indexer) Index(ctx context.Context, root string) (<-chan Progress, er
 				CurrentFile: path,
 			})
 		}
+		idx.mu.Lock()
+		idx.entries = newEntries
+		idx.mu.Unlock()
 		send(Progress{Phase: "done", Done: total, Total: total})
 	}()
 	return progress, nil

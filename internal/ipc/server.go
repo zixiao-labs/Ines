@@ -24,14 +24,16 @@ const ProtocolVersion = "1.0"
 // loop but answers requests via worker goroutines so a long-running index
 // run never blocks an incoming metrics request.
 type Server struct {
-	codec    *Codec
-	indexer  *index.Indexer
-	metrics  *metrics.Reporter
-	mu       sync.Mutex
-	wkspc    string
-	indexCtx context.Context
-	cancel   context.CancelFunc
-	closed   bool
+	codec      *Codec
+	indexer    *index.Indexer
+	metrics    *metrics.Reporter
+	mu         sync.Mutex
+	wkspc      string
+	indexCtx   context.Context
+	cancel     context.CancelFunc
+	closed     bool
+	runCtx     context.Context
+	runCancel  context.CancelFunc
 }
 
 // NewServer wires the wire codec to the indexer and metrics reporter.
@@ -47,13 +49,20 @@ func NewServer(codec *Codec, indexer *index.Indexer, reporter *metrics.Reporter)
 // cancelled. Errors during request handling are surfaced as TypeError
 // frames so Logos can render them inline.
 func (s *Server) Run(ctx context.Context) error {
-	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	runCtx, runCancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.runCtx = runCtx
+	s.runCancel = runCancel
+	s.mu.Unlock()
+	defer runCancel()
+
+	heartbeatCtx, stopHeartbeat := context.WithCancel(runCtx)
 	defer stopHeartbeat()
 	go s.heartbeatLoop(heartbeatCtx)
 
 	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if runCtx.Err() != nil {
+			return runCtx.Err()
 		}
 		frame, err := s.codec.ReadFrame()
 		if err != nil {
@@ -62,7 +71,7 @@ func (s *Server) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		go s.dispatch(ctx, frame)
+		go s.dispatch(runCtx, frame)
 	}
 }
 
@@ -233,6 +242,9 @@ func (s *Server) handleShutdown(frame *Frame) {
 		s.cancel()
 	}
 	s.closed = true
+	if s.runCancel != nil {
+		s.runCancel()
+	}
 	s.mu.Unlock()
 	s.respond(frame, map[string]any{"acknowledged": true})
 }
