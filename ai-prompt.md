@@ -28,4 +28,4 @@ Includes dependencies during indexing and avoids lazy loading.
 
 Supports reporting of memory usage, average generation time, and CPU utilization via IPC interface.
 
-Requires support for syntax highlighting, intelligent code completion, safe refactoring, and problem diagnosis in C, C++, Java, Javascript/TypeScript, Swift, and Rust.
+Requires support for syntax highlighting, intelligent code completion, safe refactoring, and problem diagnosis in C, C++, Java, Javascript/TypeScript, Swift, Go，and Rust.
