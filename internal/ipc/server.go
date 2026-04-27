@@ -75,6 +75,9 @@ func (s *Server) Run(ctx context.Context) error {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
+			if runCtx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 		go s.dispatch(runCtx, frame)
