@@ -20,12 +20,14 @@ type Codec struct {
 	reader *bufio.Reader
 	writer io.Writer
 	wmu    sync.Mutex
+	closer io.Closer
 }
 
 // NewCodec wires a Codec onto the provided streams. Pass os.Stdin/os.Stdout
 // when running as a child process of Logos.
 func NewCodec(r io.Reader, w io.Writer) *Codec {
-	return &Codec{reader: bufio.NewReaderSize(r, 64<<10), writer: w}
+	closer, _ := r.(io.Closer)
+	return &Codec{reader: bufio.NewReaderSize(r, 64<<10), writer: w, closer: closer}
 }
 
 // ReadFrame blocks until a complete frame is available. It returns io.EOF
@@ -78,6 +80,15 @@ func (c *Codec) WriteFrame(frame *Frame) error {
 	}
 	if flusher, ok := c.writer.(interface{ Flush() error }); ok {
 		return flusher.Flush()
+	}
+	return nil
+}
+
+// Close closes the underlying reader if it implements io.Closer. This unblocks
+// any pending ReadFrame calls, allowing graceful shutdown.
+func (c *Codec) Close() error {
+	if c.closer != nil {
+		return c.closer.Close()
 	}
 	return nil
 }

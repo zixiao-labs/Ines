@@ -60,6 +60,12 @@ func (s *Server) Run(ctx context.Context) error {
 	defer stopHeartbeat()
 	go s.heartbeatLoop(heartbeatCtx)
 
+	// Spawn a goroutine to close the codec when runCtx is canceled, unblocking ReadFrame.
+	go func() {
+		<-runCtx.Done()
+		_ = s.codec.Close()
+	}()
+
 	for {
 		if runCtx.Err() != nil {
 			return runCtx.Err()
@@ -76,6 +82,17 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) dispatch(ctx context.Context, frame *Frame) {
+	// Return early if the server is shutting down to prevent processing frames after shutdown.
+	if ctx.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return
+	}
+
 	switch frame.Type {
 	case TypeRequest:
 		s.handleRequest(ctx, frame)
@@ -114,6 +131,17 @@ func (s *Server) handleInitialize(frame *Frame) {
 		s.respondError(frame, 400, err.Error())
 		return
 	}
+
+	// Validate protocol version compatibility by comparing major versions.
+	if params.ProtocolVersion != "" {
+		clientMajor := parseMajorVersion(params.ProtocolVersion)
+		serverMajor := parseMajorVersion(ProtocolVersion)
+		if clientMajor != serverMajor {
+			s.respondError(frame, 426, "incompatible protocol version")
+			return
+		}
+	}
+
 	s.mu.Lock()
 	s.wkspc = params.Workspace
 	s.mu.Unlock()
@@ -315,6 +343,17 @@ func unmarshal(raw json.RawMessage, dst any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, dst)
+}
+
+// parseMajorVersion extracts the major version number from a version string.
+// For "1.0" it returns "1", for "2.1.3" it returns "2", etc.
+func parseMajorVersion(version string) string {
+	for i, c := range version {
+		if c == '.' {
+			return version[:i]
+		}
+	}
+	return version
 }
 
 // Ensure psi is imported even if no symbol from it is referenced after
