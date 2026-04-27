@@ -266,15 +266,17 @@ func (s *Server) handleMetricsSnapshot(frame *Frame) {
 
 func (s *Server) handleShutdown(frame *Frame) {
 	s.mu.Lock()
-	if s.cancel != nil {
-		s.cancel()
-	}
 	s.closed = true
-	if s.runCancel != nil {
-		s.runCancel()
-	}
+	cancel := s.cancel
+	runCancel := s.runCancel
 	s.mu.Unlock()
 	s.respond(frame, map[string]any{"acknowledged": true})
+	if cancel != nil {
+		cancel()
+	}
+	if runCancel != nil {
+		runCancel()
+	}
 }
 
 func (s *Server) respond(frame *Frame, payload any) {
