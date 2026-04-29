@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zixiao-labs/ines/internal/buildinfo"
+	"github.com/zixiao-labs/ines/internal/feature"
 	"github.com/zixiao-labs/ines/internal/index"
 	"github.com/zixiao-labs/ines/internal/lang"
 	"github.com/zixiao-labs/ines/internal/metrics"
@@ -27,6 +28,7 @@ type Server struct {
 	codec    *Codec
 	indexer  *index.Indexer
 	metrics  *metrics.Reporter
+	feature  *feature.Service
 	mu       sync.Mutex
 	wkspc    string
 	indexCtx context.Context
@@ -40,6 +42,7 @@ func NewServer(codec *Codec, indexer *index.Indexer, reporter *metrics.Reporter)
 		codec:   codec,
 		indexer: indexer,
 		metrics: reporter,
+		feature: feature.New(indexer),
 	}
 }
 
@@ -92,6 +95,16 @@ func (s *Server) handleRequest(ctx context.Context, frame *Frame) {
 		s.handleIndexLookup(frame)
 	case MethodMetricsSnapshot:
 		s.handleMetricsSnapshot(frame)
+	case MethodIDECompletion:
+		s.handleCompletion(frame)
+	case MethodIDEDefinition:
+		s.handleDefinition(frame)
+	case MethodIDEReferences:
+		s.handleReferences(frame)
+	case MethodIDERename:
+		s.handleRename(frame)
+	case MethodIDEDiagnostics:
+		s.handleDiagnostics(frame)
 	case MethodShutdown:
 		s.handleShutdown(frame)
 	default:
@@ -192,13 +205,115 @@ func (s *Server) handleIndexLookup(frame *Frame) {
 		Language: entry.Language,
 	}
 	for _, child := range entry.File.Children() {
-		r := child.Range()
-		out.Symbols = append(out.Symbols, SymbolOutput{
-			Kind:  string(child.Kind()),
-			Name:  child.Name(),
-			Start: r.Start,
-			End:   r.End,
+		out.Symbols = append(out.Symbols, symbolFromElement(child))
+	}
+	s.respond(frame, out)
+}
+
+func symbolFromElement(el psi.Element) SymbolOutput {
+	r := el.Range()
+	out := SymbolOutput{
+		Kind:  string(el.Kind()),
+		Name:  el.Name(),
+		Start: r.Start,
+		End:   r.End,
+	}
+	for _, child := range el.Children() {
+		out.Children = append(out.Children, symbolFromElement(child))
+	}
+	return out
+}
+
+func (s *Server) handleCompletion(frame *Frame) {
+	var params CompletionParams
+	if err := unmarshal(frame.Params, &params); err != nil {
+		s.respondError(frame, 400, err.Error())
+		return
+	}
+	items := s.feature.Completion(params.Path, params.Prefix, params.Limit)
+	out := CompletionResult{Items: make([]CompletionItem, 0, len(items))}
+	for _, it := range items {
+		out.Items = append(out.Items, CompletionItem{
+			Label:      it.Label,
+			Kind:       string(it.Kind),
+			Detail:     it.Detail,
+			InsertText: it.Label,
+			Path:       it.Path,
 		})
+	}
+	s.respond(frame, out)
+}
+
+func (s *Server) handleDefinition(frame *Frame) {
+	var params DefinitionParams
+	if err := unmarshal(frame.Params, &params); err != nil {
+		s.respondError(frame, 400, err.Error())
+		return
+	}
+	locations := s.feature.Definition(params.Path, params.Offset)
+	out := DefinitionResult{Locations: make([]Location, 0, len(locations))}
+	for _, l := range locations {
+		out.Locations = append(out.Locations, Location{Path: l.Path, Start: l.Start, End: l.End})
+	}
+	s.respond(frame, out)
+}
+
+func (s *Server) handleReferences(frame *Frame) {
+	var params ReferencesParams
+	if err := unmarshal(frame.Params, &params); err != nil {
+		s.respondError(frame, 400, err.Error())
+		return
+	}
+	locations := s.feature.References(params.Path, params.Offset, params.IncludeDeclaration)
+	out := ReferencesResult{Locations: make([]Location, 0, len(locations))}
+	for _, l := range locations {
+		out.Locations = append(out.Locations, Location{Path: l.Path, Start: l.Start, End: l.End})
+	}
+	s.respond(frame, out)
+}
+
+func (s *Server) handleRename(frame *Frame) {
+	var params RenameParams
+	if err := unmarshal(frame.Params, &params); err != nil {
+		s.respondError(frame, 400, err.Error())
+		return
+	}
+	oldName, edits := s.feature.Rename(params.Path, params.Offset, params.NewName)
+	out := RenameResult{
+		OldName: oldName,
+		NewName: params.NewName,
+		Edits:   make([]TextEdit, 0, len(edits)),
+	}
+	for _, e := range edits {
+		out.Edits = append(out.Edits, TextEdit{
+			Path:    e.Path,
+			Start:   e.Start,
+			End:     e.End,
+			NewText: e.NewText,
+		})
+	}
+	s.respond(frame, out)
+}
+
+func (s *Server) handleDiagnostics(frame *Frame) {
+	var params DiagnosticsParams
+	if err := unmarshal(frame.Params, &params); err != nil {
+		s.respondError(frame, 400, err.Error())
+		return
+	}
+	diagnostics := s.feature.Diagnostics(params.Path)
+	out := DiagnosticsResult{Diagnostics: []DiagnosticOutput{}}
+	for path, list := range diagnostics {
+		for _, d := range list {
+			out.Diagnostics = append(out.Diagnostics, DiagnosticOutput{
+				Path:     path,
+				Severity: d.Severity,
+				Message:  d.Message,
+				Source:   d.Source,
+				Start:    d.Start,
+				End:      d.End,
+			})
+		}
 	}
 	s.respond(frame, out)
 }

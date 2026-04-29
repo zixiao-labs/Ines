@@ -18,11 +18,13 @@ import (
 // Entry is the per-file record the indexer maintains. It bundles the parsed
 // PSI tree with bookkeeping the IPC layer surfaces over its API.
 type Entry struct {
-	Path     string
-	Language string
-	File     psi.File
-	Size     int64
-	IndexAt  time.Time
+	Path        string
+	Language    string
+	File        psi.File
+	Source      []byte
+	Size        int64
+	IndexAt     time.Time
+	Diagnostics []parser.Diagnostic
 }
 
 // Indexer walks a workspace and builds a snapshot of PSI trees for every
@@ -173,20 +175,31 @@ func (idx *Indexer) parseOne(path string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	file, err := adapter.Parser.Parse(parser.Source{
+	src := parser.Source{
 		Path:     path,
 		Content:  content,
 		Language: adapter.Language,
-	})
+	}
+	var (
+		file        psi.File
+		diagnostics []parser.Diagnostic
+	)
+	if dp, ok := adapter.Parser.(parser.DiagnosingParser); ok {
+		file, diagnostics, err = dp.ParseWithDiagnostics(src)
+	} else {
+		file, err = adapter.Parser.Parse(src)
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &Entry{
-		Path:     path,
-		Language: adapter.Language,
-		File:     file,
-		Size:     info.Size(),
-		IndexAt:  time.Now(),
+		Path:        path,
+		Language:    adapter.Language,
+		File:        file,
+		Source:      content,
+		Size:        info.Size(),
+		IndexAt:     time.Now(),
+		Diagnostics: diagnostics,
 	}, nil
 }
 

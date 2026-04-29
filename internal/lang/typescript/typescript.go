@@ -1,29 +1,22 @@
 // Package typescript registers the TypeScript / JavaScript adapter.
+//
+// Since M2 the parser is backed by a hand-written, bracket-aware scanner
+// surfaced through the treesitter abstraction. The new pipeline records
+// nested classes and methods, parameter lists, namespaces and type aliases
+// — replacing the line-oriented regex bootstrap. The Backend interface
+// shape matches tree-sitter's vocabulary so a future swap to a real grammar
+// is a drop-in replacement.
 package typescript
 
 import (
-	"regexp"
-
 	"github.com/zixiao-labs/ines/internal/lang"
-	"github.com/zixiao-labs/ines/internal/lang/regexparser"
-	"github.com/zixiao-labs/ines/internal/psi"
+	"github.com/zixiao-labs/ines/internal/lang/treesitter"
 )
 
 func init() {
-	rules := []regexparser.Rule{
-		regexparser.MustRule(psi.KindImport, `^\s*import\s+.*?from\s+['"]([^'"]+)['"]`),
-		regexparser.MustRule(psi.KindImport, `^\s*import\s+['"]([^'"]+)['"]`),
-		regexparser.MustRule(psi.KindClass, `^\s*(?:export\s+)?(?:abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindInterface, `^\s*(?:export\s+)?interface\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindEnum, `^\s*(?:export\s+)?(?:const\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindFunction, `^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(`),
-		regexparser.MustRule(psi.KindFunction, `^\s*(?:export\s+)?const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::[^=]+)?\s*=\s*(?:async\s*)?\(`),
-		regexparser.MustRule(psi.KindVariable, `^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)`),
-	}
-	parser := regexparser.New("typescript", rules, regexp.MustCompile(`^\s*//`))
 	lang.Register(&lang.Adapter{
 		Language:   "typescript",
 		Extensions: []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"},
-		Parser:     parser,
+		Parser:     treesitter.NewParser(newTSBackend()),
 	})
 }

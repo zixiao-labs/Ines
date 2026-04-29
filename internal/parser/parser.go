@@ -32,3 +32,23 @@ type Parser interface {
 	// adapter's responsibility.
 	Parse(src Source) (psi.File, error)
 }
+
+// Diagnostic is the public shape of a parse-time warning or error. The
+// concrete tree-sitter backend produces these alongside its PSI tree; the
+// indexer copies them into Entry so IDE features can serve them.
+type Diagnostic struct {
+	Severity int
+	Message  string
+	Source   string
+	Start    int
+	End      int
+}
+
+// DiagnosingParser is implemented by parsers that surface structured
+// diagnostics. The indexer probes for it via type assertion after every
+// parse. Parsers that satisfy this interface return the same PSI tree
+// Parse() would produce, plus any diagnostics the backend recovered.
+type DiagnosingParser interface {
+	Parser
+	ParseWithDiagnostics(Source) (psi.File, []Diagnostic, error)
+}
