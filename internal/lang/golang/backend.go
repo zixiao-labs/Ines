@@ -239,6 +239,15 @@ func posOffset(tf *token.File, pos token.Pos) int {
 	if tf == nil || pos == token.NoPos {
 		return 0
 	}
+	// go/parser can emit positions one past the file end when recovering from
+	// syntax errors. Clamp to the valid range to avoid a panic in Offset.
+	base := token.Pos(tf.Base())
+	limit := base + token.Pos(tf.Size())
+	if pos < base {
+		pos = base
+	} else if pos > limit {
+		pos = limit
+	}
 	off := tf.Offset(pos)
 	if off < 0 {
 		return 0
