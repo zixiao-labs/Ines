@@ -25,7 +25,7 @@ func TestIndexerEmitsProgressAndPopulatesEntries(t *testing.T) {
 	must("b/util.ts", "export function go() {}\n")
 	must("node_modules/ignored.go", "package x\n")
 
-	idx := NewIndexer()
+	idx := NewIndexer(nil)
 	ch, err := idx.Index(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("index: %v", err)

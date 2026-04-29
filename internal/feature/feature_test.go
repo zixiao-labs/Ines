@@ -39,7 +39,7 @@ func Helper() string {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	idx := index.NewIndexer()
+	idx := index.NewIndexer(nil)
 	ch, err := idx.Index(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestDiagnosticsSurfacesParseErrors(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("package x\nfunc oops( {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	idx := index.NewIndexer()
+	idx := index.NewIndexer(nil)
 	ch, err := idx.Index(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)

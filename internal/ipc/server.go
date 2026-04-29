@@ -25,15 +25,17 @@ const ProtocolVersion = "1.0"
 // loop but answers requests via worker goroutines so a long-running index
 // run never blocks an incoming metrics request.
 type Server struct {
-	codec    *Codec
-	indexer  *index.Indexer
-	metrics  *metrics.Reporter
-	feature  *feature.Service
-	mu       sync.Mutex
-	wkspc    string
-	indexCtx context.Context
-	cancel   context.CancelFunc
-	closed   bool
+	codec      *Codec
+	indexer    *index.Indexer
+	metrics    *metrics.Reporter
+	feature    *feature.Service
+	mu         sync.Mutex
+	wkspc      string
+	indexCtx   context.Context
+	cancel     context.CancelFunc
+	closed     bool
+	runCtx     context.Context
+	runCancel  context.CancelFunc
 }
 
 // NewServer wires the wire codec to the indexer and metrics reporter.
@@ -50,26 +52,53 @@ func NewServer(codec *Codec, indexer *index.Indexer, reporter *metrics.Reporter)
 // cancelled. Errors during request handling are surfaced as TypeError
 // frames so Logos can render them inline.
 func (s *Server) Run(ctx context.Context) error {
-	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	runCtx, runCancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.runCtx = runCtx
+	s.runCancel = runCancel
+	s.mu.Unlock()
+	defer runCancel()
+
+	heartbeatCtx, stopHeartbeat := context.WithCancel(runCtx)
 	defer stopHeartbeat()
 	go s.heartbeatLoop(heartbeatCtx)
 
+	// Spawn a goroutine to close the codec when runCtx is canceled, unblocking ReadFrame.
+	go func() {
+		<-runCtx.Done()
+		_ = s.codec.Close()
+	}()
+
 	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if runCtx.Err() != nil {
+			return runCtx.Err()
 		}
 		frame, err := s.codec.ReadFrame()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
+			if runCtx.Err() != nil {
+				return nil
+			}
 			return err
 		}
-		go s.dispatch(ctx, frame)
+		go s.dispatch(runCtx, frame)
 	}
 }
 
 func (s *Server) dispatch(ctx context.Context, frame *Frame) {
+	// Return early if the server is shutting down to prevent processing frames after shutdown.
+	if ctx.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return
+	}
+
 	switch frame.Type {
 	case TypeRequest:
 		s.handleRequest(ctx, frame)
@@ -118,6 +147,17 @@ func (s *Server) handleInitialize(frame *Frame) {
 		s.respondError(frame, 400, err.Error())
 		return
 	}
+
+	// Validate protocol version compatibility by comparing major versions.
+	if params.ProtocolVersion != "" {
+		clientMajor := parseMajorVersion(params.ProtocolVersion)
+		serverMajor := parseMajorVersion(ProtocolVersion)
+		if clientMajor != serverMajor {
+			s.respondError(frame, 426, "incompatible protocol version")
+			return
+		}
+	}
+
 	s.mu.Lock()
 	s.wkspc = params.Workspace
 	s.mu.Unlock()
@@ -173,6 +213,8 @@ func (s *Server) handleIndexWorkspace(ctx context.Context, frame *Frame) {
 	}
 
 	go func() {
+		// Capture the context for this indexing run to detect stale updates.
+		runCtx := indexCtx
 		for p := range progressCh {
 			s.notify(NotifIndexProgress, IndexProgress{
 				Phase:       p.Phase,
@@ -182,8 +224,12 @@ func (s *Server) handleIndexWorkspace(ctx context.Context, frame *Frame) {
 				Fraction:    p.Fraction(),
 			})
 		}
-		stats := s.indexer.Stats()
-		s.metrics.SetIndexedFiles(stats.Files)
+		// Only update metrics if this context hasn't been cancelled (i.e., we're
+		// still the active indexing run).
+		if runCtx.Err() == nil {
+			stats := s.indexer.Stats()
+			s.metrics.SetIndexedFiles(stats.Files)
+		}
 	}()
 
 	s.respond(frame, map[string]any{"accepted": true, "workspace": workspace})
@@ -338,12 +384,17 @@ func (s *Server) handleMetricsSnapshot(frame *Frame) {
 
 func (s *Server) handleShutdown(frame *Frame) {
 	s.mu.Lock()
-	if s.cancel != nil {
-		s.cancel()
-	}
 	s.closed = true
+	cancel := s.cancel
+	runCancel := s.runCancel
 	s.mu.Unlock()
 	s.respond(frame, map[string]any{"acknowledged": true})
+	if cancel != nil {
+		cancel()
+	}
+	if runCancel != nil {
+		runCancel()
+	}
 }
 
 func (s *Server) respond(frame *Frame, payload any) {
@@ -412,6 +463,17 @@ func unmarshal(raw json.RawMessage, dst any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, dst)
+}
+
+// parseMajorVersion extracts the major version number from a version string.
+// For "1.0" it returns "1", for "2.1.3" it returns "2", etc.
+func parseMajorVersion(version string) string {
+	for i, c := range version {
+		if c == '.' {
+			return version[:i]
+		}
+	}
+	return version
 }
 
 // Ensure psi is imported even if no symbol from it is referenced after

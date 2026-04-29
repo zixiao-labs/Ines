@@ -21,9 +21,9 @@ type Snapshot struct {
 	NumGoroutine int
 	// NumGC is the cumulative count of finalised GC cycles.
 	NumGC uint32
-	// CPUSeconds is the cumulative CPU time consumed by the process. The
-	// scaffold reports an approximation derived from runtime.MemStats; the
-	// follow-up gRPC migration will surface true OS counters.
+	// CPUSeconds is the cumulative CPU time consumed by the process; not
+	// sampled by default (remains 0 until an OS counter is wired up via
+	// AddCPUSeconds). See Reporter.AddCPUSeconds and Reporter.Snapshot.
 	CPUSeconds float64
 	// AverageParseDuration is the rolling mean of per-file parse durations
 	// observed by the indexer.
