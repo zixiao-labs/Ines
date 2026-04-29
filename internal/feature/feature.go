@@ -229,6 +229,14 @@ func (s *Service) identifierAt(path string, offset int) string {
 	return string(src[start:end])
 }
 
+// nameRanged is the optional surface implemented by PSI nodes that expose the
+// identifier sub-range. We use it to keep declaration locations aligned with
+// the byte-level matches scanOccurrencesIn returns; without it the comparison
+// in References would never line up because Range() spans the whole body.
+type nameRanged interface {
+	NameRange() psi.Range
+}
+
 func (s *Service) findDeclarations(name string) []Location {
 	var out []Location
 	for _, entry := range s.idx.Snapshot() {
@@ -243,6 +251,11 @@ func (s *Service) findDeclarations(name string) []Location {
 				return
 			}
 			r := el.Range()
+			if nr, ok := el.(nameRanged); ok {
+				if got := nr.NameRange(); got != (psi.Range{}) {
+					r = got
+				}
+			}
 			out = append(out, Location{Path: entry.Path, Start: r.Start, End: r.End})
 		}))
 	}
@@ -282,6 +295,7 @@ func (s *Service) scanWorkspaceFor(name string) []Location {
 func scanOccurrencesIn(path string, source []byte, name string) []Location {
 	var out []Location
 	n := len(name)
+	trivia := triviaMask(source)
 	for i := 0; i <= len(source)-n; i++ {
 		if source[i] != name[0] {
 			continue
@@ -295,9 +309,115 @@ func scanOccurrencesIn(path string, source []byte, name string) []Location {
 		if i+n < len(source) && isIdentRune(source[i+n]) {
 			continue
 		}
+		if trivia[i] {
+			continue
+		}
 		out = append(out, Location{Path: path, Start: i, End: i + n})
 	}
 	return out
+}
+
+// triviaMask returns a bitmap the same length as source where each byte that
+// belongs to a comment, string literal or template literal is marked true. The
+// rules we honour are common to Go, TypeScript, JavaScript, Rust, Java, Swift
+// and C/C++: //-line comments, /* */-block comments, single/double-quoted
+// strings, and back-tick template literals. That covers every M2 backend; the
+// only false positive on languages without templates is a stray back-tick,
+// which would have to be balanced inside source to mislead us anyway.
+func triviaMask(source []byte) []bool {
+	mask := make([]bool, len(source))
+	i := 0
+	for i < len(source) {
+		c := source[i]
+		switch {
+		case c == '/' && i+1 < len(source) && source[i+1] == '/':
+			start := i
+			i += 2
+			for i < len(source) && source[i] != '\n' {
+				i++
+			}
+			markRange(mask, start, i)
+		case c == '/' && i+1 < len(source) && source[i+1] == '*':
+			start := i
+			i += 2
+			for i+1 < len(source) && !(source[i] == '*' && source[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(source) {
+				i += 2
+			} else {
+				i = len(source)
+			}
+			markRange(mask, start, i)
+		case c == '"' || c == '\'':
+			start := i
+			quote := c
+			i++
+			for i < len(source) && source[i] != quote {
+				if source[i] == '\\' && i+1 < len(source) {
+					i += 2
+					continue
+				}
+				if source[i] == '\n' {
+					// Unterminated string: stop the literal at the line
+					// break so we do not mask the whole rest of the file.
+					break
+				}
+				i++
+			}
+			if i < len(source) && source[i] == quote {
+				i++
+			}
+			markRange(mask, start, i)
+		case c == '`':
+			start := i
+			i++
+			for i < len(source) && source[i] != '`' {
+				if source[i] == '\\' && i+1 < len(source) {
+					i += 2
+					continue
+				}
+				if source[i] == '$' && i+1 < len(source) && source[i+1] == '{' {
+					// Template substitutions are real code; mask only the
+					// literal portion preceding ${, then resume scanning.
+					markRange(mask, start, i)
+					i += 2
+					depth := 1
+					for i < len(source) && depth > 0 {
+						switch source[i] {
+						case '{':
+							depth++
+						case '}':
+							depth--
+						}
+						i++
+					}
+					start = i
+					continue
+				}
+				i++
+			}
+			if i < len(source) && source[i] == '`' {
+				i++
+			}
+			markRange(mask, start, i)
+		default:
+			i++
+		}
+	}
+	return mask
+}
+
+func markRange(mask []bool, start, end int) {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(mask) {
+		end = len(mask)
+	}
+	for i := start; i < end; i++ {
+		mask[i] = true
+	}
 }
 
 func locationKey(l Location) string {

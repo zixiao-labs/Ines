@@ -58,7 +58,7 @@ type Symbol struct {
 // Severity matches the LSP convention (1=Error, 2=Warning, 3=Info, 4=Hint)
 // so renderer-side translation is a no-op.
 type Diagnostic struct {
-	Severity int
+	Severity parser.DiagnosticSeverity
 	Message  string
 	Range    psi.Range
 	Source   string
@@ -84,6 +84,15 @@ func liftSymbol(sym *Symbol, source []byte, language string) psi.Element {
 		return nil
 	}
 	el := psi.NewElement(sym.Kind, sym.Name, sym.Range, source, language)
+	if sym.Detail != "" {
+		el.SetDetail(sym.Detail)
+	}
+	if sym.Signature != "" {
+		el.SetSignature(sym.Signature)
+	}
+	if sym.NameRange != (psi.Range{}) {
+		el.SetNameRange(sym.NameRange)
+	}
 	for _, child := range sym.Children {
 		c := liftSymbol(child, source, language)
 		if c != nil {
@@ -139,7 +148,7 @@ func (p *adapterParser) ParseWithDiagnostics(src parser.Source) (psi.File, []par
 	diagnostics := make([]parser.Diagnostic, 0, len(tree.Diagnostics))
 	for _, d := range tree.Diagnostics {
 		diagnostics = append(diagnostics, parser.Diagnostic{
-			Severity: d.Severity,
+			Severity: parser.NormalizeSeverity(int(d.Severity)),
 			Message:  d.Message,
 			Source:   d.Source,
 			Start:    d.Range.Start,

@@ -328,7 +328,7 @@ func (s *scanner) parseTypeAlias(start int) *treesitter.Symbol {
 		end = s.i
 	}
 	return &treesitter.Symbol{
-		Kind:      psi.KindEnum,
+		Kind:      psi.KindTypeAlias,
 		Name:      name,
 		Range:     psi.Range{Start: start, End: end},
 		NameRange: psi.Range{Start: nameStart, End: nameStart + len(name)},
@@ -382,6 +382,10 @@ func (s *scanner) parseVarStatement(start int) []*treesitter.Symbol {
 				if peek {
 					isFunction = true
 				}
+			} else if s.scanSingleParamArrowAhead() {
+				// Single-parameter arrow form `x => …` — the parser used to
+				// only recognise the parenthesised variant.
+				isFunction = true
 			}
 		}
 		// Read until next , or ; to mark the declaration end.
@@ -539,6 +543,24 @@ func (s *scanner) skipUntilParamSeparator() {
 		s.i++
 		_ = depth
 	}
+}
+
+// scanSingleParamArrowAhead reports whether the current position starts an
+// identifier immediately followed by `=>` (optionally with whitespace between),
+// which is the bare single-parameter arrow form `x => …`. The scanner does NOT
+// consume input.
+func (s *scanner) scanSingleParamArrowAhead() bool {
+	if s.i >= len(s.src) || !isIdentStart(rune(s.src[s.i])) {
+		return false
+	}
+	j := s.i + 1
+	for j < len(s.src) && isIdentPart(rune(s.src[j])) {
+		j++
+	}
+	for j < len(s.src) && unicode.IsSpace(rune(s.src[j])) {
+		j++
+	}
+	return j+1 < len(s.src) && s.src[j] == '=' && s.src[j+1] == '>'
 }
 
 // scanArrowAhead checks whether the current position starts a parenthesised

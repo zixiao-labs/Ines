@@ -46,7 +46,7 @@ enum Status { Open, Closed }
 		"Repository": psi.KindInterface,
 		"add":        psi.KindFunction,
 		"multiply":   psi.KindFunction,
-		"Id":         psi.KindEnum,
+		"Id":         psi.KindTypeAlias,
 		"Status":     psi.KindEnum,
 	}
 	for name, kind := range expectations {

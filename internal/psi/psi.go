@@ -34,6 +34,7 @@ const (
 	KindInterface  Kind = "interface"
 	KindStruct     Kind = "struct"
 	KindEnum       Kind = "enum"
+	KindTypeAlias  Kind = "typeAlias"
 	KindMethod     Kind = "method"
 	KindFunction   Kind = "function"
 	KindParameter  Kind = "parameter"

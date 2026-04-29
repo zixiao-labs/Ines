@@ -5,13 +5,16 @@ package psi
 // (kind, name, range, parent/children, language) so that language adapters
 // only need to add behavioural methods on top.
 type BaseElement struct {
-	kind     Kind
-	name     string
-	rng      Range
-	source   []byte
-	parent   Element
-	children []Element
-	language string
+	kind      Kind
+	name      string
+	rng       Range
+	nameRange Range
+	detail    string
+	signature string
+	source    []byte
+	parent    Element
+	children  []Element
+	language  string
 }
 
 // NewElement constructs a BaseElement and is the lowest-level constructor used
@@ -35,7 +38,22 @@ func (b *BaseElement) Parent() Element {
 	}
 	return b.parent
 }
-func (b *BaseElement) Language() string { return b.language }
+func (b *BaseElement) Language() string  { return b.language }
+func (b *BaseElement) Detail() string    { return b.detail }
+func (b *BaseElement) Signature() string { return b.signature }
+func (b *BaseElement) NameRange() Range  { return b.nameRange }
+
+// SetDetail attaches a short human-readable description (typically a type
+// hint) used by completion and outline rendering.
+func (b *BaseElement) SetDetail(detail string) { b.detail = detail }
+
+// SetSignature attaches the full declaration signature (e.g. the function
+// header up to the body) so renderers can show it without re-parsing.
+func (b *BaseElement) SetSignature(sig string) { b.signature = sig }
+
+// SetNameRange records the sub-range of Range that covers just the
+// identifier so rename refactorings can produce minimal text edits.
+func (b *BaseElement) SetNameRange(r Range) { b.nameRange = r }
 
 // Text returns the source slice the element was built from. It clamps the
 // range so that callers cannot panic if a buggy parser produced a range that

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"sort"
 	"sync"
 	"time"
 
@@ -256,6 +257,15 @@ func (s *Server) handleIndexLookup(frame *Frame) {
 	s.respond(frame, out)
 }
 
+// detailedElement is the optional surface implemented by PSI nodes that
+// carry the extended metadata the M2 backends produce. It lets the IPC layer
+// stay decoupled from the BaseElement concrete type while still surfacing the
+// fields when a backend supplies them.
+type detailedElement interface {
+	Detail() string
+	Signature() string
+}
+
 func symbolFromElement(el psi.Element) SymbolOutput {
 	r := el.Range()
 	out := SymbolOutput{
@@ -263,6 +273,10 @@ func symbolFromElement(el psi.Element) SymbolOutput {
 		Name:  el.Name(),
 		Start: r.Start,
 		End:   r.End,
+	}
+	if d, ok := el.(detailedElement); ok {
+		out.Detail = d.Detail()
+		out.Signature = d.Signature()
 	}
 	for _, child := range el.Children() {
 		out.Children = append(out.Children, symbolFromElement(child))
@@ -353,7 +367,7 @@ func (s *Server) handleDiagnostics(frame *Frame) {
 		for _, d := range list {
 			out.Diagnostics = append(out.Diagnostics, DiagnosticOutput{
 				Path:     path,
-				Severity: d.Severity,
+				Severity: int(d.Severity),
 				Message:  d.Message,
 				Source:   d.Source,
 				Start:    d.Start,
@@ -361,6 +375,18 @@ func (s *Server) handleDiagnostics(frame *Frame) {
 			})
 		}
 	}
+	// Map iteration above is non-deterministic; sort by Path/Start/End so the
+	// wire response is stable for golden tests and renderer diffing.
+	sort.Slice(out.Diagnostics, func(i, j int) bool {
+		a, b := out.Diagnostics[i], out.Diagnostics[j]
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Start != b.Start {
+			return a.Start < b.Start
+		}
+		return a.End < b.End
+	})
 	s.respond(frame, out)
 }
 

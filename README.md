@@ -34,10 +34,13 @@ installer.
 Source files travel through three layers:
 
 1. **Lexical analysis** turns the bytes into tokens.
-2. **Parsing** builds an AST. The bootstrap implementation uses a
-   line-oriented regex parser; the next milestone replaces it with a
-   tree-sitter wrapper that lives behind the same `parser.Parser`
-   interface.
+2. **Parsing** builds an AST. Go is parsed by `go/parser` and TypeScript /
+   JavaScript by a bracket-aware scanner; both adapters sit behind the
+   `internal/lang/treesitter` `Backend` interface so a real CGO-backed
+   tree-sitter grammar can drop in later without touching call sites. The
+   line-oriented regex parser is still kept in
+   `internal/lang/regexparser` as the bootstrap fallback for languages whose
+   M2 adapters have not landed yet (Rust, Java, Swift, C/C++).
 3. **PSI wrapping** lifts AST nodes into `psi.Element` values that carry
    behavioural capabilities: navigation (Parent/Children), querying
    (`FindByKind`, `FindByName`), and structural metadata used by completion,
