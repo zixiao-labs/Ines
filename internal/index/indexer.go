@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -194,11 +195,7 @@ func (idx *Indexer) parseOne(path string) (*Entry, error) {
 		diagnostics []parser.Diagnostic
 	)
 	start := time.Now()
-	if dp, ok := adapter.Parser.(parser.DiagnosingParser); ok {
-		file, diagnostics, err = dp.ParseWithDiagnostics(src)
-	} else {
-		file, err = adapter.Parser.Parse(src)
-	}
+	file, diagnostics, err = safeParse(adapter.Parser, src)
 	duration := time.Since(start)
 	if idx.reporter != nil {
 		idx.reporter.ObserveParse(duration)
@@ -215,6 +212,26 @@ func (idx *Indexer) parseOne(path string) (*Entry, error) {
 		IndexAt:     time.Now(),
 		Diagnostics: diagnostics,
 	}, nil
+}
+
+// safeParse runs the adapter parser inside a recover guard so that a panic
+// originating in any single backend cannot crash the whole indexing run. On
+// panic it returns a nil file, no diagnostics and an error that names both the
+// parser type and the source path so the caller can attribute the failure.
+func safeParse(p parser.Parser, src parser.Source) (file psi.File, diagnostics []parser.Diagnostic, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			file = nil
+			diagnostics = nil
+			err = fmt.Errorf("indexer: parser %T panicked on %q: %v", p, src.Path, r)
+		}
+	}()
+	if dp, ok := p.(parser.DiagnosingParser); ok {
+		file, diagnostics, err = dp.ParseWithDiagnostics(src)
+		return
+	}
+	file, err = p.Parse(src)
+	return
 }
 
 // Lookup returns the Entry for path, or nil when the file has not been

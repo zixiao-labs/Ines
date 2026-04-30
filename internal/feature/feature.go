@@ -92,7 +92,7 @@ func (s *Service) Completion(path, prefix string, limit int) []CompletionItem {
 			if prefix != "" && !strings.HasPrefix(strings.ToLower(el.Name()), prefix) {
 				return
 			}
-			add(el.Name(), el.Kind(), entry.Language, entry.Path)
+			add(el.Name(), el.Kind(), elementDetail(el), entry.Path)
 		}))
 	}
 
@@ -235,6 +235,30 @@ func (s *Service) identifierAt(path string, offset int) string {
 // in References would never line up because Range() spans the whole body.
 type nameRanged interface {
 	NameRange() psi.Range
+}
+
+// detailed and signed are the optional surfaces implemented by PSI nodes that
+// expose richer information about a declaration. Completion prefers the full
+// signature when available so the renderer can show "func Foo(x int) error"
+// rather than just the language id.
+type detailed interface {
+	Detail() string
+}
+
+type signed interface {
+	Signature() string
+}
+
+func elementDetail(el psi.Element) string {
+	if s, ok := el.(signed); ok {
+		if sig := s.Signature(); sig != "" {
+			return sig
+		}
+	}
+	if d, ok := el.(detailed); ok {
+		return d.Detail()
+	}
+	return ""
 }
 
 func (s *Service) findDeclarations(name string) []Location {
