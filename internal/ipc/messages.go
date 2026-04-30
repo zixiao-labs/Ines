@@ -29,6 +29,11 @@ const (
 	MethodIndexLookup      = "index/lookup"
 	MethodMetricsSnapshot  = "metrics/snapshot"
 	MethodShutdown         = "shutdown"
+	MethodIDECompletion    = "ide/completion"
+	MethodIDEDefinition    = "ide/definition"
+	MethodIDEReferences    = "ide/references"
+	MethodIDERename        = "ide/rename"
+	MethodIDEDiagnostics   = "ide/diagnostics"
 	NotifIndexProgress     = "index/progress"
 	NotifMetricsHeartbeat  = "metrics/heartbeat"
 	NotifInitializeStatus  = "initialize/status"
@@ -97,13 +102,123 @@ type IndexLookupResult struct {
 	Symbols  []SymbolOutput `json:"symbols"`
 }
 
-// SymbolOutput is one row in the outline. Range is the byte range inside
-// the source file.
+// SymbolOutput is one row in the outline. Range is the byte range inside the
+// source file. Children carry the nested members that M2 surfaces (class
+// methods, struct fields, function parameters …); the older renderer
+// happily ignores it because the JSON tag is omitempty.
 type SymbolOutput struct {
-	Kind  string `json:"kind"`
-	Name  string `json:"name"`
+	Kind      string         `json:"kind"`
+	Name      string         `json:"name"`
+	Start     int            `json:"start"`
+	End       int            `json:"end"`
+	Detail    string         `json:"detail,omitempty"`
+	Signature string         `json:"signature,omitempty"`
+	Children  []SymbolOutput `json:"children,omitempty"`
+}
+
+// CompletionParams asks the daemon for completion candidates at a position.
+// Path is the file the user is editing; Offset is the byte offset of the
+// caret. Prefix is the partial identifier the renderer wants to match
+// against.
+type CompletionParams struct {
+	Path   string `json:"path"`
+	Offset int    `json:"offset"`
+	Prefix string `json:"prefix,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// CompletionItem is one row in the completion popup. Kind matches psi.Kind
+// so the renderer can use the same icon set as the outline.
+type CompletionItem struct {
+	Label      string `json:"label"`
+	Kind       string `json:"kind"`
+	Detail     string `json:"detail,omitempty"`
+	InsertText string `json:"insertText,omitempty"`
+	Path       string `json:"path,omitempty"`
+}
+
+// CompletionResult is the IDE-side response to a completion request.
+type CompletionResult struct {
+	Items []CompletionItem `json:"items"`
+}
+
+// DefinitionParams locates a symbol at the given offset.
+type DefinitionParams struct {
+	Path   string `json:"path"`
+	Offset int    `json:"offset"`
+}
+
+// Location is a path + half-open byte range in the source. Used by
+// definition / references / rename.
+type Location struct {
+	Path  string `json:"path"`
 	Start int    `json:"start"`
 	End   int    `json:"end"`
+}
+
+// DefinitionResult is the response to ide/definition.
+type DefinitionResult struct {
+	Locations []Location `json:"locations"`
+}
+
+// ReferencesParams asks for every reference to the symbol identified at the
+// given offset. IncludeDeclaration controls whether the declaration site is
+// included in the result list.
+type ReferencesParams struct {
+	Path               string `json:"path"`
+	Offset             int    `json:"offset"`
+	IncludeDeclaration bool   `json:"includeDeclaration"`
+}
+
+// ReferencesResult is the response to ide/references.
+type ReferencesResult struct {
+	Locations []Location `json:"locations"`
+}
+
+// RenameParams asks for the text edits that rename the symbol at offset
+// across the workspace.
+type RenameParams struct {
+	Path    string `json:"path"`
+	Offset  int    `json:"offset"`
+	NewName string `json:"newName"`
+}
+
+// TextEdit replaces the bytes inside Range (relative to Path) with NewText.
+type TextEdit struct {
+	Path    string `json:"path"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+	NewText string `json:"newText"`
+}
+
+// RenameResult is the response to ide/rename. Edits is grouped by file in
+// source order so the renderer can apply them top-to-bottom without
+// recomputing offsets.
+type RenameResult struct {
+	OldName string     `json:"oldName"`
+	NewName string     `json:"newName"`
+	Edits   []TextEdit `json:"edits"`
+}
+
+// DiagnosticsParams requests the cached diagnostics for a file. When Path is
+// empty every indexed file's diagnostics are returned.
+type DiagnosticsParams struct {
+	Path string `json:"path,omitempty"`
+}
+
+// DiagnosticOutput is the wire shape of treesitter.Diagnostic.
+type DiagnosticOutput struct {
+	Path     string `json:"path"`
+	Severity int    `json:"severity"`
+	Message  string `json:"message"`
+	Source   string `json:"source,omitempty"`
+	Start    int    `json:"start"`
+	End      int    `json:"end"`
+}
+
+// DiagnosticsResult is the response to ide/diagnostics.
+type DiagnosticsResult struct {
+	Diagnostics []DiagnosticOutput `json:"diagnostics"`
 }
 
 // MetricsSnapshot is the JSON shape of metrics.Snapshot.

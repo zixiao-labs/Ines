@@ -1,29 +1,20 @@
 // Package golang registers the Go language adapter.
+//
+// Since M2 the parser is backed by go/parser via the treesitter abstraction
+// in internal/lang/treesitter, replacing the line-oriented regex bootstrap.
+// The new pipeline surfaces nested type members, methods, parameters and
+// signatures rather than just the top-level declarations.
 package golang
 
 import (
-	"regexp"
-
 	"github.com/zixiao-labs/ines/internal/lang"
-	"github.com/zixiao-labs/ines/internal/lang/regexparser"
-	"github.com/zixiao-labs/ines/internal/psi"
+	"github.com/zixiao-labs/ines/internal/lang/treesitter"
 )
 
 func init() {
-	rules := []regexparser.Rule{
-		regexparser.MustRule(psi.KindPackage, `^\s*package\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindImport, `^\s*import\s+(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))`),
-		regexparser.MustRule(psi.KindStruct, `^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b`),
-		regexparser.MustRule(psi.KindInterface, `^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+interface\b`),
-		regexparser.MustRule(psi.KindEnum, `^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:int|int8|int16|int32|int64|uint|uint8|uint16|uint32|uint64|string)\b`),
-		regexparser.MustRule(psi.KindMethod, `^\s*func\s*\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindFunction, `^\s*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*[\[(]`),
-		regexparser.MustRule(psi.KindVariable, `^\s*var\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindVariable, `^\s*const\s+([A-Za-z_][A-Za-z0-9_]*)`),
-	}
 	lang.Register(&lang.Adapter{
 		Language:   "go",
 		Extensions: []string{".go"},
-		Parser:     regexparser.New("go", rules, regexp.MustCompile(`^\s*//`)),
+		Parser:     treesitter.NewParser(newGoBackend()),
 	})
 }

@@ -32,3 +32,48 @@ type Parser interface {
 	// adapter's responsibility.
 	Parse(src Source) (psi.File, error)
 }
+
+// DiagnosticSeverity classifies how serious a parse-time finding is. Values
+// match the LSP convention so a bare int round-trips through the wire codec
+// without translation, but the named type stops adapters from drifting into
+// ad-hoc severity numbers and gives the renderer stable colour/icon/filter
+// semantics on the other end of the IPC channel.
+type DiagnosticSeverity int
+
+const (
+	SeverityError   DiagnosticSeverity = 1
+	SeverityWarning DiagnosticSeverity = 2
+	SeverityInfo    DiagnosticSeverity = 3
+	SeverityHint    DiagnosticSeverity = 4
+)
+
+// NormalizeSeverity clamps an arbitrary integer (e.g. one decoded from JSON)
+// into the supported range, defaulting to SeverityError so an unknown value
+// never silently disappears from the renderer.
+func NormalizeSeverity(v int) DiagnosticSeverity {
+	switch DiagnosticSeverity(v) {
+	case SeverityError, SeverityWarning, SeverityInfo, SeverityHint:
+		return DiagnosticSeverity(v)
+	}
+	return SeverityError
+}
+
+// Diagnostic is the public shape of a parse-time warning or error. The
+// concrete tree-sitter backend produces these alongside its PSI tree; the
+// indexer copies them into Entry so IDE features can serve them.
+type Diagnostic struct {
+	Severity DiagnosticSeverity
+	Message  string
+	Source   string
+	Start    int
+	End      int
+}
+
+// DiagnosingParser is implemented by parsers that surface structured
+// diagnostics. The indexer probes for it via type assertion after every
+// parse. Parsers that satisfy this interface return the same PSI tree
+// Parse() would produce, plus any diagnostics the backend recovered.
+type DiagnosingParser interface {
+	Parser
+	ParseWithDiagnostics(Source) (psi.File, []Diagnostic, error)
+}
