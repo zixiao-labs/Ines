@@ -161,14 +161,16 @@ func genDeclSymbols(decl *ast.GenDecl, source []byte, tf *token.File) []*treesit
 }
 
 func typeSymbol(spec *ast.TypeSpec, source []byte, tf *token.File) *treesitter.Symbol {
-	kind := psi.KindClass
+	// Go has no "class" — every named type that is not a struct or interface
+	// is a type alias / named type. Defaulting to KindTypeAlias keeps newer
+	// node shapes (FuncType, StarExpr, generic instantiations, …) classified
+	// correctly without needing an exhaustive switch.
+	kind := psi.KindTypeAlias
 	switch spec.Type.(type) {
 	case *ast.StructType:
 		kind = psi.KindStruct
 	case *ast.InterfaceType:
 		kind = psi.KindInterface
-	case *ast.Ident, *ast.SelectorExpr, *ast.MapType, *ast.ArrayType, *ast.ChanType:
-		kind = psi.KindTypeAlias
 	}
 	sym := &treesitter.Symbol{
 		Kind:      kind,

@@ -110,13 +110,29 @@ type adapterParser struct {
 }
 
 // NewParser returns a parser.Parser that delegates to backend. When backend
-// is nil it returns nil, which lets callers fall back to the regex parser
-// during gradual rollout.
+// is nil it returns a no-op parser that yields an empty PSI file and no
+// diagnostics — never nil — so callers can invoke Parse / ParseWithDiagnostics
+// without a guarded type-assertion.
 func NewParser(backend Backend) parser.Parser {
 	if backend == nil {
-		return nil
+		return noopParser{}
 	}
 	return &adapterParser{backend: backend}
+}
+
+// noopParser is the safety-net implementation NewParser hands out when no
+// backend is supplied. It satisfies parser.DiagnosingParser so callers that
+// do a type assertion still get a useful (empty) result instead of a panic.
+type noopParser struct{}
+
+func (noopParser) Language() string { return "" }
+
+func (noopParser) Parse(src parser.Source) (psi.File, error) {
+	return psi.NewFile(src.Path, src.Language, src.Content), nil
+}
+
+func (noopParser) ParseWithDiagnostics(src parser.Source) (psi.File, []parser.Diagnostic, error) {
+	return psi.NewFile(src.Path, src.Language, src.Content), nil, nil
 }
 
 func (p *adapterParser) Language() string { return p.backend.Language() }

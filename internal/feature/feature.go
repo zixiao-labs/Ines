@@ -305,7 +305,7 @@ func (s *Service) scanWorkspaceFor(name string) []Location {
 		if entry == nil || entry.Source == nil {
 			continue
 		}
-		out = append(out, scanOccurrencesIn(entry.Path, entry.Source, name)...)
+		out = append(out, scanOccurrencesIn(entry.Path, entry.Source, entry.Language, name)...)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Path != out[j].Path {
@@ -316,10 +316,10 @@ func (s *Service) scanWorkspaceFor(name string) []Location {
 	return out
 }
 
-func scanOccurrencesIn(path string, source []byte, name string) []Location {
+func scanOccurrencesIn(path string, source []byte, language, name string) []Location {
 	var out []Location
 	n := len(name)
-	trivia := triviaMask(source)
+	trivia := triviaMask(source, language)
 	for i := 0; i <= len(source)-n; i++ {
 		if source[i] != name[0] {
 			continue
@@ -345,10 +345,18 @@ func scanOccurrencesIn(path string, source []byte, name string) []Location {
 // belongs to a comment, string literal or template literal is marked true. The
 // rules we honour are common to Go, TypeScript, JavaScript, Rust, Java, Swift
 // and C/C++: //-line comments, /* */-block comments, single/double-quoted
-// strings, and back-tick template literals. That covers every M2 backend; the
-// only false positive on languages without templates is a stray back-tick,
-// which would have to be balanced inside source to mislead us anyway.
-func triviaMask(source []byte) []bool {
+// strings, and back-tick literals.
+//
+// Backtick semantics depend on the language: JavaScript and TypeScript use
+// them for template literals where `${expr}` re-enters real code, while Go
+// uses them for raw strings that have no substitution and must be masked end
+// to end. Other languages either reject backticks or treat them as literal,
+// so the safe default is to mask the whole segment.
+func triviaMask(source []byte, language string) []bool {
+	// Only the TypeScript / JavaScript adapter uses backticks for template
+	// literals; every other language we ship treats them as a raw or absent
+	// token, so the safe default is to mask the whole segment.
+	templateBackticks := language == "typescript"
 	mask := make([]bool, len(source))
 	i := 0
 	for i < len(source) {
@@ -397,11 +405,11 @@ func triviaMask(source []byte) []bool {
 			start := i
 			i++
 			for i < len(source) && source[i] != '`' {
-				if source[i] == '\\' && i+1 < len(source) {
+				if templateBackticks && source[i] == '\\' && i+1 < len(source) {
 					i += 2
 					continue
 				}
-				if source[i] == '$' && i+1 < len(source) && source[i+1] == '{' {
+				if templateBackticks && source[i] == '$' && i+1 < len(source) && source[i+1] == '{' {
 					// Template substitutions are real code; mask only the
 					// literal portion preceding ${, then resume scanning.
 					markRange(mask, start, i)

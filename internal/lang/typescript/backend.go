@@ -388,6 +388,13 @@ func (s *scanner) parseVarStatement(start int) []*treesitter.Symbol {
 				isFunction = true
 			}
 		}
+		var (
+			children  []*treesitter.Symbol
+			signature string
+		)
+		if isFunction {
+			children, signature = s.consumeFunctionInitializer(start)
+		}
 		// Read until next , or ; to mark the declaration end.
 		end := s.skipUntilOneOfTopLevel(',', ';', '\n')
 		kind := psi.KindVariable
@@ -400,6 +407,8 @@ func (s *scanner) parseVarStatement(start int) []*treesitter.Symbol {
 			Range:     psi.Range{Start: start, End: end},
 			NameRange: psi.Range{Start: nameStart, End: nameStart + len(name)},
 			Detail:    strings.TrimSpace(string(s.src[start:end])),
+			Signature: signature,
+			Children:  children,
 		})
 		if s.i < len(s.src) && s.src[s.i] == ',' {
 			s.i++
@@ -412,6 +421,88 @@ func (s *scanner) parseVarStatement(start int) []*treesitter.Symbol {
 		s.i++
 	}
 	return out
+}
+
+// consumeFunctionInitializer parses the right-hand side of a `const|let|var`
+// binding that has already been classified as a function (an arrow form or a
+// `function` expression). It collects parameters, captures the signature text
+// from declStart up to the body delimiter, and leaves the cursor parked just
+// before the body (`=>`, `{`, `;`, or `,`) so the caller's statement-end scan
+// finishes the work without double-walking.
+func (s *scanner) consumeFunctionInitializer(declStart int) ([]*treesitter.Symbol, string) {
+	if s.lookAhead("function") {
+		s.consume("function")
+		s.skipTrivia()
+		// Generator marker `function*`.
+		if s.i < len(s.src) && s.src[s.i] == '*' {
+			s.i++
+			s.skipTrivia()
+		}
+		// Optional name — `const x = function named() {}`.
+		if s.i < len(s.src) && isIdentStart(rune(s.src[s.i])) {
+			s.readIdent()
+			s.skipTrivia()
+		}
+	}
+	if s.i < len(s.src) && s.src[s.i] == '<' {
+		s.skipMatched('<', '>')
+		s.skipTrivia()
+	}
+	var params []*treesitter.Symbol
+	if s.i < len(s.src) && s.src[s.i] == '(' {
+		params = s.collectParams()
+	} else if s.i < len(s.src) && isIdentStart(rune(s.src[s.i])) {
+		// Single-parameter arrow `x => …`.
+		paramStart := s.i
+		paramName := s.readIdent()
+		if paramName != "" {
+			params = []*treesitter.Symbol{{
+				Kind:      psi.KindParameter,
+				Name:      paramName,
+				Range:     psi.Range{Start: paramStart, End: paramStart + len(paramName)},
+				NameRange: psi.Range{Start: paramStart, End: paramStart + len(paramName)},
+			}}
+		}
+	}
+	sigEnd := s.scanSignatureEnd()
+	signature := strings.TrimSpace(string(s.src[declStart:sigEnd]))
+	return params, signature
+}
+
+// scanSignatureEnd walks forward through return-type annotations and trivia,
+// stopping at the body delimiter (`=>`, `{`) or statement boundary (`;`, `,`,
+// newline). It honours strings, templates, comments and balanced brackets so
+// it does not punch through nested expressions.
+func (s *scanner) scanSignatureEnd() int {
+	for s.i < len(s.src) {
+		ch := s.src[s.i]
+		if ch == '{' || ch == ';' || ch == ',' || ch == '\n' {
+			return s.i
+		}
+		if ch == '=' && s.i+1 < len(s.src) && s.src[s.i+1] == '>' {
+			return s.i
+		}
+		switch ch {
+		case '(':
+			s.skipMatched('(', ')')
+			continue
+		case '[':
+			s.skipMatched('[', ']')
+			continue
+		case '"', '\'':
+			s.skipString(ch)
+			continue
+		case '`':
+			s.skipTemplate()
+			continue
+		case '/':
+			if s.skipCommentMaybe() {
+				continue
+			}
+		}
+		s.i++
+	}
+	return s.i
 }
 
 func (s *scanner) parseNamespace(start int) *treesitter.Symbol {
