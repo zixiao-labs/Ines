@@ -76,11 +76,19 @@ func (s *scanner) scanModule(tree *treesitter.Tree, out *[]*treesitter.Symbol, d
 				*out = append(*out, sym)
 			}
 		case "export":
-			// fall through; the next iteration sees the actual decl keyword
+			// Re-export forms (`export ... from "..."`) carry an import
+			// specifier we want to surface for the resolver. Anything else
+			// falls through so the next iteration sees the actual decl
+			// keyword.
 			s.skipTrivia()
 			if s.lookAhead("default") {
 				s.consume("default")
 				s.skipTrivia()
+				continue
+			}
+			if sym := s.parseReExport(start); sym != nil {
+				*out = append(*out, sym)
+				continue
 			}
 		case "abstract":
 			// Pass-through; will combine with class on next loop.
@@ -124,15 +132,51 @@ func (s *scanner) parseImport(start int) *treesitter.Symbol {
 	// Walk to the from-clause or end-of-statement and capture the path.
 	end := s.skipUntilOneOfTopLevel(';', '\n', 0)
 	chunk := s.src[start:end]
-	path := importPath(chunk)
+	relStart, relEnd, path := importPath(chunk)
 	if path == "" {
 		return nil
 	}
+	specRange := psi.Range{Start: start + relStart, End: start + relEnd}
 	return &treesitter.Symbol{
-		Kind:   psi.KindImport,
-		Name:   path,
-		Detail: strings.TrimSpace(string(chunk)),
-		Range:  psi.Range{Start: start, End: end},
+		Kind:      psi.KindImport,
+		Name:      path,
+		Detail:    strings.TrimSpace(string(chunk)),
+		Range:     psi.Range{Start: start, End: end},
+		NameRange: specRange,
+	}
+}
+
+// parseReExport recognises `export {...} from "..."`, `export * from "..."`,
+// and `export * as ns from "..."`. The cursor is parked just after the
+// `export` keyword. When the statement is not actually a re-export the
+// scanner is rewound to before `export` and the function returns nil so the
+// regular parseModule loop handles the trailing declaration.
+func (s *scanner) parseReExport(start int) *treesitter.Symbol {
+	saved := s.i
+	end := s.skipUntilOneOfTopLevel(';', '\n', 0)
+	chunk := s.src[saved:end]
+	if !hasFromKeyword(chunk) {
+		s.i = saved
+		return nil
+	}
+	// `export type {...}` is also legal; importPath is happy either way
+	// because it ignores everything before the first quote.
+	relStart, relEnd, path := importPath(chunk)
+	if path == "" {
+		s.i = saved
+		return nil
+	}
+	if s.i < len(s.src) && s.src[s.i] == ';' {
+		s.i++
+		end = s.i
+	}
+	specRange := psi.Range{Start: saved + relStart, End: saved + relEnd}
+	return &treesitter.Symbol{
+		Kind:      psi.KindImport,
+		Name:      path,
+		Detail:    strings.TrimSpace(string(s.src[start:end])),
+		Range:     psi.Range{Start: start, End: end},
+		NameRange: specRange,
 	}
 }
 
@@ -978,18 +1022,93 @@ func isIdentPart(r rune) bool {
 	return isIdentStart(r) || unicode.IsDigit(r)
 }
 
-func importPath(chunk []byte) string {
+// importPath scans chunk for the first quoted string literal and returns its
+// content along with the byte range (relative to chunk) of the quoted
+// literal — quotes included — so callers can squiggle the specifier
+// precisely. When chunk has no string literal the function returns
+// (0, 0, "").
+func importPath(chunk []byte) (int, int, string) {
 	for i := 0; i < len(chunk); i++ {
 		c := chunk[i]
-		if c == '"' || c == '\'' {
+		if c == '"' || c == '\'' || c == '`' {
 			j := i + 1
 			for j < len(chunk) && chunk[j] != c {
+				if chunk[j] == '\\' && j+1 < len(chunk) {
+					j += 2
+					continue
+				}
 				j++
 			}
 			if j < len(chunk) {
-				return string(chunk[i+1 : j])
+				return i, j + 1, string(chunk[i+1 : j])
 			}
+			return 0, 0, ""
 		}
 	}
-	return ""
+	return 0, 0, ""
+}
+
+// hasFromKeyword reports whether chunk contains a top-level `from` keyword
+// outside any string / template / comment. The TypeScript adapter uses it
+// to distinguish re-exports (`export {x} from "..."`) from local exports
+// (`export {x};`).
+func hasFromKeyword(chunk []byte) bool {
+	i := 0
+	for i < len(chunk) {
+		c := chunk[i]
+		switch c {
+		case '"', '\'':
+			i++
+			for i < len(chunk) && chunk[i] != c {
+				if chunk[i] == '\\' && i+1 < len(chunk) {
+					i += 2
+					continue
+				}
+				i++
+			}
+			if i < len(chunk) {
+				i++
+			}
+			continue
+		case '`':
+			i++
+			for i < len(chunk) && chunk[i] != '`' {
+				if chunk[i] == '\\' && i+1 < len(chunk) {
+					i += 2
+					continue
+				}
+				i++
+			}
+			if i < len(chunk) {
+				i++
+			}
+			continue
+		case '/':
+			if i+1 < len(chunk) && chunk[i+1] == '/' {
+				for i < len(chunk) && chunk[i] != '\n' {
+					i++
+				}
+				continue
+			}
+			if i+1 < len(chunk) && chunk[i+1] == '*' {
+				i += 2
+				for i+1 < len(chunk) && !(chunk[i] == '*' && chunk[i+1] == '/') {
+					i++
+				}
+				if i+1 < len(chunk) {
+					i += 2
+				}
+				continue
+			}
+		}
+		if c == 'f' && i+4 <= len(chunk) && string(chunk[i:i+4]) == "from" {
+			before := i == 0 || !isIdentPart(rune(chunk[i-1]))
+			after := i+4 >= len(chunk) || !isIdentPart(rune(chunk[i+4]))
+			if before && after {
+				return true
+			}
+		}
+		i++
+	}
+	return false
 }
