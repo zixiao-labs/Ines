@@ -16,18 +16,9 @@ import (
 
 func TestIndexerEmitsProgressAndPopulatesEntries(t *testing.T) {
 	dir := t.TempDir()
-	must := func(rel, body string) {
-		path := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	must("a/main.go", "package a\nfunc Hello() {}\n")
-	must("b/util.ts", "export function go() {}\n")
-	must("node_modules/ignored.go", "package x\n")
+	writeTestFile(t, dir, "a/main.go", "package a\nfunc Hello() {}\n")
+	writeTestFile(t, dir, "b/util.ts", "export function go() {}\n")
+	writeTestFile(t, dir, "node_modules/ignored.go", "package x\n")
 
 	idx := NewIndexer(nil)
 	ch, err := idx.Index(context.Background(), dir)
@@ -78,14 +69,7 @@ impl Counter {
 }
 `
 	must := func(rel, body string) {
-		t.Helper()
-		path := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeTestFile(t, dir, rel, body)
 	}
 	must("src/lib.rs", src)
 
@@ -121,6 +105,20 @@ func sliceContains(xs []string, want string) bool {
 	return false
 }
 
+// writeTestFile writes body to dir/rel, creating any missing parent
+// directories. Centralised so the indexer tests share one consistent
+// implementation (and one consistent t.Helper() frame on failures).
+func writeTestFile(t *testing.T, dir, rel, body string) {
+	t.Helper()
+	path := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestIndexerRunsSemanticAugmenter is the end-to-end check that the
 // indexer hands its workspace root and parsed PSI to the language-specific
 // augmenter, and that the augmenter's diagnostics land on the entry the
@@ -129,14 +127,7 @@ func sliceContains(xs []string, want string) bool {
 func TestIndexerRunsSemanticAugmenter(t *testing.T) {
 	dir := t.TempDir()
 	must := func(rel, body string) {
-		t.Helper()
-		path := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		writeTestFile(t, dir, rel, body)
 	}
 	must("tsconfig.json", `{"compilerOptions":{"baseUrl":"./","paths":{"@/*":["src/*"]}}}`)
 	must("src/main.ts", `import { good } from "@/util";

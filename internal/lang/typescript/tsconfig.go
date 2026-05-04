@@ -76,10 +76,8 @@ func findTSConfigUp(start, ceiling string) string {
 			return ""
 		}
 		if ceilingAbs != "" && (dir == ceilingAbs || !strings.HasPrefix(parent, ceilingAbs)) {
-			// We've climbed past the workspace root; stop.
-			if dir == ceilingAbs {
-				return ""
-			}
+			// We've reached (or climbed past) the workspace root; stop.
+			return ""
 		}
 		dir = parent
 	}

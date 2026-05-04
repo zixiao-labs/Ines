@@ -1,7 +1,6 @@
 package typescript
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -152,7 +151,7 @@ func (s *stubBridge) WorkspaceDiagnostics(workspace string) (map[string][]parser
 
 func TestAugmenterMergesBridgeDiagnostics(t *testing.T) {
 	dir := t.TempDir()
-	src := []byte(`export const x = 1;\n`)
+	src := []byte("export const x = 1;\n")
 	path := filepath.Join(dir, "src", "x.ts")
 	writeFile(t, path, string(src))
 	file := parseFile(t, path, src)
@@ -209,10 +208,4 @@ func TestAugmenterRebuildsResolverOnWorkspaceSwitch(t *testing.T) {
 	if r2 != r3 {
 		t.Fatalf("expected resolver reuse for the same workspace")
 	}
-}
-
-func init() {
-	// Touching os keeps go vet from flagging an unused import when we
-	// shrink the helper file in the future.
-	_ = os.TempDir
 }

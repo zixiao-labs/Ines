@@ -301,16 +301,23 @@ impl<T> Foo<T> {
 }
 `
 	tree := parseRust(t, src)
-	if len(tree.Symbols) < 2 {
-		t.Fatalf("expected at least 2 impl symbols, got %d", len(tree.Symbols))
-	}
 	// Trait impl keeps `Trait for Type` so the symbol name is unique
-	// against the bare-Type inherent impl.
-	if !strings.Contains(tree.Symbols[0].Name, "Display for Foo") {
-		t.Errorf("trait impl display name should be `Display for Foo<T>`, got %q", tree.Symbols[0].Name)
+	// against the bare-Type inherent impl. Search by name rather than
+	// by position so the test does not depend on backend ordering.
+	var traitImpl, inherentImpl *treesitter.Symbol
+	for _, s := range tree.Symbols {
+		if strings.Contains(s.Name, "Display for Foo") {
+			traitImpl = s
+		}
+		if s.Name == "Foo<T>" {
+			inherentImpl = s
+		}
 	}
-	if tree.Symbols[1].Name != "Foo<T>" {
-		t.Errorf("inherent impl display name should be `Foo<T>`, got %q", tree.Symbols[1].Name)
+	if traitImpl == nil {
+		t.Errorf("trait impl symbol `Display for Foo<T>` not found, got=%v", topLevelNames(tree.Symbols))
+	}
+	if inherentImpl == nil {
+		t.Errorf("inherent impl symbol `Foo<T>` not found, got=%v", topLevelNames(tree.Symbols))
 	}
 }
 
