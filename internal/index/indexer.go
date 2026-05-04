@@ -117,7 +117,7 @@ func (idx *Indexer) Index(ctx context.Context, root string) (<-chan Progress, er
 			if ctx.Err() != nil {
 				return
 			}
-			entry, err := idx.parseOne(path)
+			entry, err := idx.parseOne(root, path)
 			if err == nil && entry != nil {
 				newEntries[path] = entry
 			}
@@ -169,7 +169,7 @@ func (idx *Indexer) scan(ctx context.Context, root string) ([]string, error) {
 	return queue, err
 }
 
-func (idx *Indexer) parseOne(path string) (*Entry, error) {
+func (idx *Indexer) parseOne(workspace, path string) (*Entry, error) {
 	adapter := lang.ByPath(path)
 	if adapter == nil {
 		return nil, nil
@@ -203,6 +203,21 @@ func (idx *Indexer) parseOne(path string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Apply the workspace-aware augmenter, if one is registered for this
+	// language. Augmenter panics are guarded the same way safeParse handles
+	// parser panics so that a single buggy file or specifier cannot poison
+	// the whole index run.
+	if aug := parser.SemanticAugmenterFor(adapter.Language); aug != nil {
+		extra := safeAugment(aug, parser.SemanticContext{
+			Workspace: workspace,
+			Path:      path,
+			Source:    content,
+			File:      file,
+		})
+		if len(extra) > 0 {
+			diagnostics = append(diagnostics, extra...)
+		}
+	}
 	return &Entry{
 		Path:        path,
 		Language:    adapter.Language,
@@ -232,6 +247,19 @@ func safeParse(p parser.Parser, src parser.Source) (file psi.File, diagnostics [
 	}
 	file, err = p.Parse(src)
 	return
+}
+
+// safeAugment runs an augmenter inside a recover guard. A buggy resolver
+// must not destabilise an indexing run, so panics are swallowed and the
+// caller treats them as "no extra diagnostics".
+func safeAugment(a parser.SemanticAugmenter, ctx parser.SemanticContext) (out []parser.Diagnostic) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "indexer: semantic augmenter %T panicked on %q: %v\n", a, ctx.Path, r)
+			out = nil
+		}
+	}()
+	return a.AugmentDiagnostics(ctx)
 }
 
 // Lookup returns the Entry for path, or nil when the file has not been

@@ -1,28 +1,25 @@
 // Package rust registers the Rust language adapter.
+//
+// Since the upgrade to M2 the parser is a hand-written, bracket- and
+// comment-aware scanner shaped after rust-analyzer's grammar. The new
+// pipeline records nested items (mod / impl / trait bodies), struct
+// fields, enum variants, and full function signatures — replacing the
+// line-oriented regex bootstrap that only saw declaration headers.
+//
+// The Backend interface shape mirrors tree-sitter's vocabulary so a
+// future swap to a real grammar (the day we are willing to take on the
+// CGO dependency) is a drop-in replacement.
 package rust
 
 import (
-	"regexp"
-
 	"github.com/zixiao-labs/ines/internal/lang"
-	"github.com/zixiao-labs/ines/internal/lang/regexparser"
-	"github.com/zixiao-labs/ines/internal/psi"
+	"github.com/zixiao-labs/ines/internal/lang/treesitter"
 )
 
 func init() {
-	rules := []regexparser.Rule{
-		regexparser.MustRule(psi.KindImport, `^\s*use\s+([A-Za-z_][A-Za-z0-9_:]*)`),
-		regexparser.MustRule(psi.KindNamespace, `^\s*(?:pub(?:\([^)]+\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindStruct, `^\s*(?:pub(?:\([^)]+\))?\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindEnum, `^\s*(?:pub(?:\([^)]+\))?\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindInterface, `^\s*(?:pub(?:\([^)]+\))?\s+)?trait\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindFunction, `^\s*(?:pub(?:\([^)]+\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:extern\s+(?:"[^"]+"\s+)?)?fn\s+([A-Za-z_][A-Za-z0-9_]*)`),
-		regexparser.MustRule(psi.KindVariable, `^\s*(?:pub(?:\([^)]+\))?\s+)?(?:static|const)\s+([A-Z_][A-Z0-9_]*)`),
-	}
-	parser := regexparser.New("rust", rules, regexp.MustCompile(`^\s*//`))
 	lang.Register(&lang.Adapter{
 		Language:   "rust",
 		Extensions: []string{".rs"},
-		Parser:     parser,
+		Parser:     treesitter.NewParser(newRustBackend()),
 	})
 }
